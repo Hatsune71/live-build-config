@@ -44,7 +44,7 @@ zsh-syntax-highlighting
 # NOTE: We would like to provide lingmo-linux-large in our installer images
 # but we end up with ISO images that are too big for our CDN. So disable
 # it for now.
-# lingmo-linux-large
+lingmo-linux-large
 
 # Graphical desktops
 # lingmo-desktop-xfce
