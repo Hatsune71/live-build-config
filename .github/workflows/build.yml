@@ -4,91 +4,71 @@ permissions: write-all
 
 on:
   push:
-    branches: [ "master", "debian-13" ]
+    branches: [ "master", "debian-12" ]
   pull_request:
-    branches: [ "master", "debian-13" ]
+    branches: [ "master", "debian-12" ]
   schedule:
     - cron: "59 18 * * *"
   workflow_dispatch:
 
 jobs:
   debian:
-    name: Build amd64 ISO (Debian 13 Trixie)
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        arch: ['amd64']
 
-    container:
-      image: debian:trixie
-      options: --privileged
+    name: Build ${{ matrix.arch }} iso
+    runs-on: ubuntu-latest
+    permissions: write-all
 
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          swap-size-mb: 512
+          remove-dotnet: 'true'
+          remove-android: 'true'
+
       - uses: actions/checkout@v4
 
-      # ================================
-      # INSTALL DEPENDENCIES
-      # ================================
-      - name: Install build dependencies
-        run: |
-          apt update
-          apt install -y \
-            live-build debootstrap simple-cdd \
-            debian-cd xorriso squashfs-tools \
-            mtools fakeroot git curl jq sudo \
-            ca-certificates
+      - name: Set up amd64 Debian container
+        uses: addnab/docker-run-action@v3
+        if: ${{ matrix.arch == 'amd64' }}
+        with:
+          image: docker.io/library/debian:trixie-slim
+          options: --privileged -v ${{ github.workspace }}:/work
+          run: |
+            cd /work
+            apt update
+            apt install -y sudo git fakeroot live-build debootstrap debian-cd simple-cdd xorriso squashfs-tools mtools curl jq ca-certificates
 
-      # ================================
-      # PATCH auto/config (REMOVE IP API DEPENDENCY)
-      # ================================
-      - name: Patch auto/config to use static Debian mirror
-        run: |
-          echo "Patching auto/config..."
+            git config --global --add safe.directory /work
 
-          awk '
-          BEGIN { skip=0 }
-          /# 使用ipapi查询IP地址信息/ {
-              skip=1;
-              print "lingmo_mirror=http://ftp.debian.org/debian";
-              print "public_lingmo_mirror=http://ftp.debian.org/debian";
-              next
-          }
-          /### DO NOT EDIT THE REST OF THIS FILE ###/ {
-              skip=0
-          }
-          skip==0 { print }
-          ' auto/config > auto/config.tmp && mv auto/config.tmp auto/config
+            echo "Disabling IP detection in auto/config..."
 
-          echo "Patch complete."
+            awk '
+            BEGIN { skip=0 }
+            /# 使用ipapi查询IP地址信息/ {
+                skip=1;
+                print "lingmo_mirror=http://ftp.debian.org/debian";
+                print "public_lingmo_mirror=http://ftp.debian.org/debian";
+                next
+            }
+            /### DO NOT EDIT THE REST OF THIS FILE ###/ {
+                skip=0
+            }
+            skip==0 { print }
+            ' auto/config > auto/config.tmp && mv auto/config.tmp auto/config
 
-      # ================================
-      # SHOW DISK
-      # ================================
-      - name: Show disk space
-        run: df -h
+            export LINGMO_ARCH=${{ matrix.arch }}
+            export DEBIAN_FRONTEND=noninteractive
+            bash -i ./build.sh
 
-      # ================================
-      # BUILD ISO
-      # ================================
-      - name: Build ISO
-        run: |
-          export LINGMO_ARCH=amd64
-          export DEBIAN_FRONTEND=noninteractive
-          bash ./build.sh
-
-      # ================================
-      # VERIFY OUTPUT
-      # ================================
-      - name: List ISO files
-        run: |
-          find . -name "*.iso"
-
-      # ================================
-      # UPLOAD ISO
-      # ================================
-      - name: Upload ISO Artifact
+      - name: Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: amd64-iso
-          path: |
-            images/*.iso
-            *.iso
+          name: ${{ matrix.arch }}
+          path: ${{ github.workspace }}/images/*.iso
           compression-level: 0
           if-no-files-found: error
