@@ -16,7 +16,6 @@ jobs:
     name: Build amd64 ISO (Debian 13 Trixie)
     runs-on: ubuntu-22.04
 
-    # 🔥 Run entire job inside Debian 13 container
     container:
       image: debian:trixie
       options: --privileged
@@ -25,18 +24,42 @@ jobs:
       - uses: actions/checkout@v4
 
       # ================================
-      # INSTALL BUILD DEPENDENCIES
+      # INSTALL DEPENDENCIES
       # ================================
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           apt update
           apt install -y \
-            git sudo fakeroot live-build debootstrap \
-            debian-cd simple-cdd xorriso squashfs-tools \
-            mtools curl jq ca-certificates
+            live-build debootstrap simple-cdd \
+            debian-cd xorriso squashfs-tools \
+            mtools fakeroot git curl jq sudo \
+            ca-certificates
 
       # ================================
-      # SHOW DISK SPACE
+      # PATCH auto/config (REMOVE IP API DEPENDENCY)
+      # ================================
+      - name: Patch auto/config to use static Debian mirror
+        run: |
+          echo "Patching auto/config..."
+
+          awk '
+          BEGIN { skip=0 }
+          /# 使用ipapi查询IP地址信息/ {
+              skip=1;
+              print "lingmo_mirror=http://ftp.debian.org/debian";
+              print "public_lingmo_mirror=http://ftp.debian.org/debian";
+              next
+          }
+          /### DO NOT EDIT THE REST OF THIS FILE ###/ {
+              skip=0
+          }
+          skip==0 { print }
+          ' auto/config > auto/config.tmp && mv auto/config.tmp auto/config
+
+          echo "Patch complete."
+
+      # ================================
+      # SHOW DISK
       # ================================
       - name: Show disk space
         run: df -h
@@ -51,11 +74,10 @@ jobs:
           bash ./build.sh
 
       # ================================
-      # VERIFY ISO EXISTS
+      # VERIFY OUTPUT
       # ================================
-      - name: List ISO output
+      - name: List ISO files
         run: |
-          ls -lah images || true
           find . -name "*.iso"
 
       # ================================
