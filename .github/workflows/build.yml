@@ -10,60 +10,67 @@ on:
   schedule:
     - cron: "59 18 * * *"
   workflow_dispatch:
+
 jobs:
   debian:
-    strategy:
-        matrix:
-          arch: ['amd64']
-    name: Build ${{ matrix.arch }} iso
-    runs-on: ubuntu-latest
+    name: Build amd64 iso
+    runs-on: ubuntu-22.04
     permissions: write-all
+
     steps:
+      # ================================
+      # MAXIMIZE DISK SPACE
+      # ================================
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
           root-reserve-mb: 4096
-          swap-size-mb: 512
+          swap-size-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Aggressive cleanup
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          sudo docker system prune -af || true
+          df -h
 
       - uses: actions/checkout@v4
 
-      - name: Set up amd64 Debian container
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.arch == 'amd64' }}
-        with:
-          image: docker.io/library/debian:trixie-slim
-          options: --privileged -v ${{ github.workspace }}:/work
-          run: |
-            cd /work
-            apt update; apt install sudo git fakeroot live-build debootstrap debian-cd simple-cdd xorriso squashfs-tools mtools curl jq -y
-            git config --global --add safe.directory /work
-            export LINGMO_ARCH=${{ matrix.arch }}
-            export DEBIAN_FRONTEND=noninteractive
-            bash -i ./build.sh
-            
-      - name: Set up arm64 Debian container
-        uses: uraimo/run-on-arch-action@v2
-        if: ${{ matrix.arch == 'arm64' }}
-        with:
-          arch: "aarch64"
-          distro: "bookworm"
-          # Mount the artifacts directory as /artifacts in the container
-          dockerRunArgs: |
-            --privileged -v ${{ github.workspace }}:/work
-          run: |
-            cd /work
-            apt update; apt install sudo git fakeroot live-build debootstrap debian-cd simple-cdd xorriso squashfs-tools mtools curl jq -y
-            git config --global --add safe.directory /work
-            export LINGMO_ARCH=${{ matrix.arch }}
-            export DEBIAN_FRONTEND=noninteractive
-            bash -i ./build.sh
-            
-      - name: Artifact
+      # ================================
+      # INSTALL BUILD DEPENDENCIES
+      # ================================
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git fakeroot live-build debootstrap \
+            debian-cd simple-cdd xorriso squashfs-tools \
+            mtools curl jq
+
+      # ================================
+      # BUILD ISO
+      # ================================
+      - name: Build ISO
+        run: |
+          cd $GITHUB_WORKSPACE
+          export LINGMO_ARCH=amd64
+          export DEBIAN_FRONTEND=noninteractive
+          sudo bash ./build.sh
+
+      # ================================
+      # UPLOAD ISO
+      # ================================
+      - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.arch }}
-          path: ${{ github.workspace }}/images/*.iso
+          name: amd64-iso
+          path: images/*.iso
           compression-level: 0
-          if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
+          if-no-files-found: error
